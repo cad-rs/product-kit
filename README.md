@@ -42,6 +42,10 @@ drift into two implementations.
   (`device_authorization_form`/`token_poll_form`) and the RFC 8628 §3.5 error
   vocabulary (`classify_poll_error`). The transport, endpoint discovery and
   token cache stay in each framework.
+- **crash_probe** — the selfcheck's crash-recovery subprocess probe: the
+  `ProbePhase` (A/B/C) read from the environment, the working directory, and
+  `run_phase` (spawn + timeout + capture) with a product-neutral `ProbeFailure`.
+  The probe bodies and the error wording stay in each framework.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,

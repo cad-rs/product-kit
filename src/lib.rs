@@ -8,6 +8,7 @@
 //! carries the state machines and the file-system layer they both share.
 
 pub mod auth_code;
+pub mod crash_probe;
 pub mod entitlement_refresh;
 pub mod oauth;
 pub mod pack;
@@ -34,6 +35,8 @@ pub use diagnostics::{now_secs, tail, RollingFile};
 pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSchedule, SessionGrace};
 
 pub use auth_code::{code_challenge, read_callback, Callback, CallbackEnd};
+#[cfg(not(target_family = "wasm"))]
+pub use crash_probe::{probe_dir, run_phase, ProbeFailure, ProbePhase};
 #[cfg(not(target_family = "wasm"))]
 pub use auth_code::{read_callback_query, respond};
 pub use oauth::{
