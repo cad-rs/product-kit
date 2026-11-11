@@ -7,6 +7,7 @@
 //! Zero gpui by design: the frameworks render their own overlays; this crate
 //! carries the state machines and the file-system layer they both share.
 
+pub mod entitlement_refresh;
 pub mod pack;
 pub mod picker;
 pub mod storage;
@@ -19,6 +20,7 @@ pub mod opfs;
 
 #[cfg(not(target_family = "wasm"))]
 pub use atomic::write as atomic_write;
+pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSchedule, SessionGrace};
 
 pub use pack::pack_tree;
 pub use picker::FilePicker;

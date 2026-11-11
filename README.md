@@ -15,10 +15,16 @@ drift into two implementations.
 - **atomic** — whole-file replacement that never risks the previous content
   (native builds; temp file + fsync + rename, Windows lock retry). Every
   durable file the frameworks write goes through it.
+- **entitlement_refresh** — `RefreshSchedule` (when to re-check the product's
+  plan: startup, foreground, sign-in change, half-hourly, user-asked, and the
+  two-minute post-purchase poll) and `SessionGrace` (a capability lost
+  mid-session stays usable until the app closes). The frameworks plug their
+  own answer type in through the `EntitlementSource` / `EntitlementAnswer`
+  pair.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, the settings model, product identity,
-and the account / entitlements stack.
+and the account / entitlements transport.
 
 ## Dependency direction
 
