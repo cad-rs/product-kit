@@ -17,6 +17,10 @@ thiserror = "1"
 # Project packages: deflate-only (no bzip2/lzma sys crates, so the wasm
 # build stays C-free).
 zip = { version = "2", default-features = false, features = ["deflate"] }
+# Browser sign-in (PKCE + the loopback redirect).
+base64 = "0.22"
+form_urlencoded = "1"
+sha2 = "0.10"
 
 # The browser file system lives behind these; native builds never see them.
 [target.'cfg(target_family = "wasm")'.dependencies]

@@ -7,6 +7,7 @@
 //! Zero gpui by design: the frameworks render their own overlays; this crate
 //! carries the state machines and the file-system layer they both share.
 
+pub mod auth_code;
 pub mod entitlement_refresh;
 pub mod pack;
 pub mod picker;
@@ -31,6 +32,9 @@ pub use diagnostics::{
 pub use diagnostics::{now_secs, tail, RollingFile};
 pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSchedule, SessionGrace};
 
+pub use auth_code::{code_challenge, read_callback, Callback, CallbackEnd};
+#[cfg(not(target_family = "wasm"))]
+pub use auth_code::{read_callback_query, respond};
 pub use pack::pack_tree;
 pub use picker::FilePicker;
 pub use selfcheck::{report, Check, Summary};

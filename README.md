@@ -33,6 +33,11 @@ drift into two implementations.
 - **selfcheck** — the `Check` record and the `report`/`Summary` that print
   PASS/FAIL/SKIP lines and turn them into a process exit code. The check
   suites and the crash-recovery probe driver stay in each framework.
+- **auth_code** — the browser sign-in redirect's loopback HTTP mechanics
+  (`read_callback_query`/`respond`) and the PKCE helpers
+  (`code_challenge`/`read_callback` with a product-neutral `Callback`
+  verdict). The transport, the web callback variant and the token ownership
+  stay in each framework.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
