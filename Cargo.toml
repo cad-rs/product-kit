@@ -1,0 +1,41 @@
+[package]
+name = "product-kit"
+version = "0.1.0"
+edition = "2021"
+license = "Proprietary"
+description = "Product infrastructure shared by the rcad frameworks: storage providers, the in-app file picker state, OPFS, atomic writes, i18n and settings mechanics"
+
+# Own workspace: one shared crate, consumed by the nanobot harness and the
+# workbench framework through relative path dependencies (every consumer
+# checkout is a sibling under the rcad-pro root).
+[workspace]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1"
+
+# The browser file system lives behind these; native builds never see them.
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "console",
+    "DomException",
+    "File",
+    "FileSystemDirectoryHandle",
+    "FileSystemFileHandle",
+    "FileSystemGetDirectoryOptions",
+    "FileSystemGetFileOptions",
+    "FileSystemHandle",
+    "FileSystemHandleKind",
+    "FileSystemWritableFileStream",
+    "Navigator",
+    "StorageManager",
+    "Window",
+] }
+
+[dev-dependencies]
+# The picker and storage helpers are pure logic; the tests run everywhere.
+wasm-bindgen-test = "0.3"
