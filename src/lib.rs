@@ -15,12 +15,19 @@ pub mod storage;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod atomic;
+pub mod diagnostics;
 
 #[cfg(target_family = "wasm")]
 pub mod opfs;
 
 #[cfg(not(target_family = "wasm"))]
 pub use atomic::write as atomic_write;
+pub use diagnostics::{
+    crash_report, panic_message, section, utc, utc_rfc3339, utc_stamp, CRASH_LOG_BYTES,
+    KEPT_LOGS, MAX_LOG_BYTES, MAX_REPORTS_PER_SESSION, REPORTED_LOG_BYTES,
+};
+#[cfg(not(target_family = "wasm"))]
+pub use diagnostics::{now_secs, tail, RollingFile};
 pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSchedule, SessionGrace};
 
 pub use pack::pack_tree;

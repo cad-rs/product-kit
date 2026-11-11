@@ -26,6 +26,10 @@ drift into two implementations.
   Persistence goes through the `SettingsStore` seam (workbench's keyed app
   state, nanobot's settings file); workbench adds a `SettingSpec` schema on
   top.
+- **diagnostics** — `RollingFile` (5 MB, three generations), `tail`, the UTC
+  clock helpers, and the crash-report text (`crash_report` / `panic_message`).
+  Native-only for the file parts; the frameworks keep their own logger, crash
+  report backend and export assembly.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
