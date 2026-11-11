@@ -30,6 +30,9 @@ drift into two implementations.
   clock helpers, and the crash-report text (`crash_report` / `panic_message`).
   Native-only for the file parts; the frameworks keep their own logger, crash
   report backend and export assembly.
+- **selfcheck** — the `Check` record and the `report`/`Summary` that print
+  PASS/FAIL/SKIP lines and turn them into a process exit code. The check
+  suites and the crash-recovery probe driver stay in each framework.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
