@@ -14,6 +14,9 @@ description = "Product infrastructure shared by the rcad frameworks: storage pro
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1"
+# Project packages: deflate-only (no bzip2/lzma sys crates, so the wasm
+# build stays C-free).
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 # The browser file system lives behind these; native builds never see them.
 [target.'cfg(target_family = "wasm")'.dependencies]
@@ -37,5 +40,5 @@ web-sys = { version = "0.3", features = [
 ] }
 
 [dev-dependencies]
-# The picker and storage helpers are pure logic; the tests run everywhere.
-wasm-bindgen-test = "0.3"
+# The pack test drives the async walker synchronously.
+futures-executor = "0.3"

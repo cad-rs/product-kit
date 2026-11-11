@@ -5,12 +5,14 @@
 //! Zero gpui by design: the frameworks render their own overlays; this crate
 //! carries the state machines and the file-system layer they both share.
 
+pub mod pack;
 pub mod picker;
 pub mod storage;
 
 #[cfg(target_family = "wasm")]
 pub mod opfs;
 
+pub use pack::pack_tree;
 pub use picker::FilePicker;
 pub use storage::{
     failed, has_extension, join_key, split_file_name, with_extension, Entry, Location,
