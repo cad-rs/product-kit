@@ -38,6 +38,10 @@ drift into two implementations.
   (`code_challenge`/`read_callback` with a product-neutral `Callback`
   verdict). The transport, the web callback variant and the token ownership
   stay in each framework.
+- **oauth** — the device-flow grant's request shapes
+  (`device_authorization_form`/`token_poll_form`) and the RFC 8628 §3.5 error
+  vocabulary (`classify_poll_error`). The transport, endpoint discovery and
+  token cache stay in each framework.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
