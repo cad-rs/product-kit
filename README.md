@@ -12,9 +12,12 @@ drift into two implementations.
   unit-tested; the frameworks draw their own overlays over it.
 - **opfs** — the origin-private file system as a `StorageProvider` (wasm
   builds; async page-thread API only).
+- **atomic** — whole-file replacement that never risks the previous content
+  (native builds; temp file + fsync + rename, Windows lock retry). Every
+  durable file the frameworks write goes through it.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
-atomic file writes, i18n mechanics, the settings model, product identity,
+i18n mechanics, the settings model, product identity,
 and the account / entitlements stack.
 
 ## Dependency direction
@@ -28,6 +31,7 @@ Native builds never compile the web-sys layer (it is target-gated).
 Path dependencies from sibling checkouts (the rcad-pro root lays every
 checkout out side by side):
 
-- nanobot (`nanobot/crates/nanobot-ui`): `../../../product-kit`
-- workbench-rs (`rcad/workbench-rs/crates/workbench-api`):
+- nanobot (`nanobot/crates/nanobot-ui`, `nanobot-session`, `nanobot-boot`):
+  `../../../product-kit`
+- workbench-rs (`rcad/workbench-rs/crates/workbench-core`):
   `../../../../product-kit`
