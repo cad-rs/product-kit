@@ -21,9 +21,14 @@ drift into two implementations.
   mid-session stays usable until the app closes). The frameworks plug their
   own answer type in through the `EntitlementSource` / `EntitlementAnswer`
   pair.
+- **settings** — `Settings`, flat dotted-key JSON (`ui.theme`,
+  `plugin.<id>.enabled`) written through on every change, loaded never-fatal.
+  Persistence goes through the `SettingsStore` seam (workbench's keyed app
+  state, nanobot's settings file); workbench adds a `SettingSpec` schema on
+  top.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
-i18n mechanics, the settings model, product identity,
+i18n mechanics, product identity,
 and the account / entitlements transport.
 
 ## Dependency direction
@@ -39,5 +44,5 @@ checkout out side by side):
 
 - nanobot (`nanobot/crates/nanobot-ui`, `nanobot-session`, `nanobot-boot`):
   `../../../product-kit`
-- workbench-rs (`rcad/workbench-rs/crates/workbench-core`):
-  `../../../../product-kit`
+- workbench-rs (`rcad/workbench-rs/crates/workbench-core`,
+  `crates/workbench-api`): `../../../../product-kit`

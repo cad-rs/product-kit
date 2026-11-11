@@ -10,6 +10,7 @@
 pub mod entitlement_refresh;
 pub mod pack;
 pub mod picker;
+pub mod settings;
 pub mod storage;
 
 #[cfg(not(target_family = "wasm"))]
@@ -24,6 +25,7 @@ pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSched
 
 pub use pack::pack_tree;
 pub use picker::FilePicker;
+pub use settings::{Settings, SettingsStore};
 pub use storage::{
     failed, has_extension, join_key, split_file_name, with_extension, Entry, Location,
     Storage, StorageFuture, StorageProvider,
