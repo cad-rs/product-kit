@@ -15,6 +15,10 @@ drift into two implementations.
   unit-tested; the frameworks draw their own overlays over it.
 - **opfs** — the origin-private file system as a `StorageProvider` (wasm
   builds; async page-thread API only).
+- **assets** — `AssetSource` (gpui-free: `load -> Option` + `paths()`),
+  `ChainedAssets` and `StaticAssets`: the asset loading contract. Each
+  framework bridges it to gpui's own `AssetSource` (which adds a `Result` and
+  a path-scoped `list`).
 - **atomic** — whole-file replacement that never risks the previous content
   (native builds; temp file + fsync + rename, Windows lock retry). Every
   durable file the frameworks write goes through it.

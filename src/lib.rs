@@ -7,6 +7,7 @@
 //! Zero gpui by design: the frameworks render their own overlays; this crate
 //! carries the state machines and the file-system layer they both share.
 
+pub mod assets;
 pub mod auth_code;
 pub mod crash_probe;
 pub mod entitlement_refresh;
@@ -34,6 +35,7 @@ pub use diagnostics::{
 pub use diagnostics::{now_secs, tail, RollingFile};
 pub use entitlement_refresh::{EntitlementAnswer, EntitlementSource, RefreshSchedule, SessionGrace};
 
+pub use assets::{AssetSource, ChainedAssets, StaticAssets};
 pub use auth_code::{code_challenge, read_callback, Callback, CallbackEnd};
 #[cfg(not(target_family = "wasm"))]
 pub use crash_probe::{probe_dir, run_phase, ProbeFailure, ProbePhase};
