@@ -1,0 +1,38 @@
+[package]
+name = "gpui-gpu-view"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The shared GPU render slot for gpui applications: the process-wide wgpu device and the per-platform presentation (web dynamic texture, Windows DirectComposition surface, offscreen readback) that any renderer draws through"
+
+[dependencies]
+gpui = { git = "https://github.com/longbridge/gpui-fast", rev = "a10f393d8033c5f52f34821d6a25cddadc6174b4" }
+# One wgpu for the whole workspace, at the revision gpui-fast pins: on the web
+# the renderer draws on GPUI's own device and into its textures, so the types
+# must be the same. That agreement is the point of this crate.
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }
+anyhow = "1"
+log = { version = "0.4", features = ["std"] }
+# The readback target is platform-independent; headless render cores share it.
+gpu-readback = { path = "../gpu-readback" }
+
+# Web: GPUI's renderer is wgpu itself. The viewport renders on GPUI's device
+# into a WgpuDynamicTexture, which joins the draw order as an ordinary sprite.
+# Getting that context takes the concrete WebPlatform, hence gpui_web.
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui-wgpu = { package = "gpui_wgpu", git = "https://github.com/longbridge/gpui-fast", rev = "a10f393d8033c5f52f34821d6a25cddadc6174b4" }
+gpui-web = { package = "gpui_web", git = "https://github.com/longbridge/gpui-fast", rev = "a10f393d8033c5f52f34821d6a25cddadc6174b4", default-features = false }
+
+# Desktop: the slot creates its own wgpu device (GPUI is D3D11 on Windows and
+# Metal on macOS, so there is none to share), and the fallback presentation
+# reads frames back into an image.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+pollster = "0.4"
+image = { version = "0.25", default-features = false }
+
+# Windows: the viewport's swap chain hangs on a DirectComposition visual in the
+# GPUI window's composition. The version must match gpui_windows': the native
+# surface handle is handed out as this crate's IUnknown and recovered via
+# Any::downcast.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Graphics_DirectComposition"] }

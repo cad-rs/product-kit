@@ -1,0 +1,11 @@
+[package]
+name = "gpu-readback"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Offscreen color target with CPU readback for wgpu renderers: the texture + aligned buffer shared by the GPU view slot's readback presenter and headless render cores"
+
+[dependencies]
+# One wgpu for the whole workspace, at the revision gpui-fast pins: the target
+# is created on the host's device, so the types must be the same.
+wgpu = { git = "https://github.com/gfx-rs/wgpu", rev = "cddb2f5d80dc0009b2ef6767635140cacf90a007" }

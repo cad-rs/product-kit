@@ -5,10 +5,13 @@ edition = "2021"
 license = "Proprietary"
 description = "Product infrastructure shared by the rcad frameworks: storage providers, the in-app file picker state, OPFS, atomic writes, i18n and settings mechanics"
 
-# Own workspace: one shared crate, consumed by the nanobot harness and the
+# Own workspace: the shared crates consumed by the nanobot harness and the
 # workbench framework through relative path dependencies (every consumer
-# checkout is a sibling under the rcad-pro root).
+# checkout is a sibling under the rcad-pro root). `product-kit` itself is the
+# zero-gpui product infrastructure; the `crates/` members are the GPU view
+# slot and its platform-independent readback target.
 [workspace]
+members = ["crates/gpu-readback", "crates/gpui-gpu-view"]
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

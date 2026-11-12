@@ -47,15 +47,32 @@ drift into two implementations.
   `run_phase` (spawn + timeout + capture) with a product-neutral `ProbeFailure`.
   The probe bodies and the error wording stay in each framework.
 
+The `crates/` members are the GPU view slot, shared with the same rule:
+
+- **gpu-readback** — `ReadbackTarget`: an offscreen color texture plus its
+  aligned readback buffer, and `read` copying a frame back as tightly packed
+  BGRA rows. The one piece of the slot that is not platform-specific; a
+  separate crate so headless render cores (no GUI dependency) share it too.
+- **gpui-gpu-view** — the slot itself: the process-wide wgpu device
+  (`shared_gpu` / `Gpu` / `GpuRequirements`), the per-platform presentation
+  (web dynamic texture, Windows DirectComposition surface, offscreen readback),
+  the `Viewport` / `ViewportContent` / `ViewportInput` shell, and the
+  `ViewportSlot` contract a product renderer implements.
+
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
 and the account / entitlements transport.
 
 ## Dependency direction
 
-Zero gpui. The crate is UI-framework-agnostic on purpose: both consumers sit
-on gpui-fast, but the overlays that render the picker stay in each framework.
-Native builds never compile the web-sys layer (it is target-gated).
+`product-kit` itself is zero gpui: UI-framework-agnostic on purpose, so both
+consumers (which sit on gpui-fast) can share it, and native builds never
+compile the web-sys layer (it is target-gated).
+
+The `crates/` members are the exception by design: `gpui-gpu-view` is the
+shared GPU render slot and depends on gpui + wgpu, while `gpu-readback` is its
+platform-independent readback target (wgpu only, so headless cores can use it
+without pulling gpui in).
 
 ## Consumers
 
@@ -63,6 +80,9 @@ Path dependencies from sibling checkouts (the rcad-pro root lays every
 checkout out side by side):
 
 - nanobot (`nanobot/crates/nanobot-ui`, `nanobot-session`, `nanobot-boot`):
-  `../../../product-kit`
+  `../../../product-kit`; the GPU slot:
+  `../../../product-kit/crates/gpui-gpu-view`
 - workbench-rs (`rcad/workbench-rs/crates/workbench-core`,
-  `crates/workbench-api`): `../../../../product-kit`
+  `crates/workbench-api`): `../../../../product-kit`; the GPU slot:
+  `../../../../product-kit/crates/gpui-gpu-view`, the readback target:
+  `../../../../product-kit/crates/gpu-readback`
