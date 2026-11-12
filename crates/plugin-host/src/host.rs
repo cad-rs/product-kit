@@ -28,10 +28,10 @@ use std::sync::{Arc, Mutex};
 use rhai::{Dynamic, EvalAltResult, Map, Scope};
 
 /// Sentinel a cancelled background command returns instead of a value.
-pub const CANCEL_SENTINEL: &str = "__plugin_host_cancelled__";
+pub(crate) const CANCEL_SENTINEL: &str = "__plugin_host_cancelled__";
 
 /// Dock areas a panel may ask for.
-pub const DOCK_AREAS: [&str; 4] = ["left", "right", "bottom", "top"];
+pub(crate) const DOCK_AREAS: [&str; 4] = ["left", "right", "bottom", "top"];
 
 /// A command the plugin declared.
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ pub struct Collected {
 
 /// Shared collection bucket (written by the script's global functions, read by
 /// the loading thread).
-pub type SharedCollected = Arc<Mutex<Collected>>;
+pub(crate) type SharedCollected = Arc<Mutex<Collected>>;
 
 /// A plugin's entry point source. `Send` (unlike the engine).
 pub type RhaiProgram = Arc<String>;
@@ -93,10 +93,6 @@ impl CommandResult {
             error: error.into(),
         }
     }
-
-    pub fn is_ok(&self) -> bool {
-        matches!(self, CommandResult::Done { .. })
-    }
 }
 
 /// Why a background command stopped.
@@ -124,7 +120,7 @@ struct RhaiTask {
 
 /// Builds the engine a plugin's entry point runs under. Injected globals only
 /// *collect* declarations; nothing is registered with the host here.
-pub fn build_load_engine(plugin_dir: PathBuf, collected: SharedCollected) -> rhai::Engine {
+pub(crate) fn build_load_engine(plugin_dir: PathBuf, collected: SharedCollected) -> rhai::Engine {
     let mut engine = rhai::Engine::new();
 
     // register_command(id, title, callback) — sync command (runs on the UI thread)
@@ -289,7 +285,7 @@ fn build_exec_engine() -> rhai::Engine {
 }
 
 /// Converts command arguments into the map a callback receives.
-pub fn args_to_map(args: &CommandArgs) -> Map {
+fn args_to_map(args: &CommandArgs) -> Map {
     let mut map = Map::new();
     for (key, value) in &args.values {
         map.insert(key.as_str().into(), Dynamic::from(value.clone()));
@@ -298,11 +294,6 @@ pub fn args_to_map(args: &CommandArgs) -> Map {
         map.insert("value".into(), Dynamic::from(value.clone()));
     }
     map
-}
-
-/// An empty argument map.
-pub fn empty_map() -> Map {
-    Map::new()
 }
 
 /// Runs a plugin's synchronous command callback.
@@ -339,7 +330,7 @@ pub fn run_background_callback(
         .map_err(|e| TaskFailure::Error(format!("script failed to compile: {e}")))?;
     let mut scope = Scope::new();
     let task = RhaiTask { handle };
-    match engine.call_fn::<Dynamic>(&mut scope, &ast, callback, (task, empty_map())) {
+    match engine.call_fn::<Dynamic>(&mut scope, &ast, callback, (task, rhai::Map::new())) {
         Ok(_) => Ok(()),
         Err(error) => {
             let message = error.to_string();

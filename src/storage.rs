@@ -77,11 +77,6 @@ impl Location {
         split_file_name(self.file_name()).0
     }
 
-    /// The file name's extension, without the dot.
-    pub fn extension(&self) -> Option<&str> {
-        split_file_name(self.file_name()).1
-    }
-
     /// The file or folder `name` in this folder (keys are `/`-separated
     /// paths; the root folder's key is `""`).
     pub fn child(&self, name: &str) -> Location {
@@ -272,12 +267,10 @@ mod tests {
         let local = Location::local(r"C:\work\part.v2.rcad");
         assert_eq!(local.file_name(), "part.v2.rcad");
         assert_eq!(local.file_stem(), "part.v2");
-        assert_eq!(local.extension(), Some("rcad"));
         assert_eq!(local.to_string(), r"C:\work\part.v2.rcad");
 
         let opfs = Location::new("opfs", "docs/.hidden");
         assert_eq!(opfs.file_stem(), ".hidden");
-        assert_eq!(opfs.extension(), None);
         assert_eq!(opfs.to_string(), "opfs:docs/.hidden");
     }
 

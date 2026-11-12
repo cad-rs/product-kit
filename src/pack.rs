@@ -50,7 +50,7 @@ pub async fn pack_tree(storage: &Storage, provider: &str, root: &str) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::{Entry, StorageProvider};
+    use crate::storage::StorageProvider;
 
     /// An in-memory provider over a fixed tree.
     struct Memory {

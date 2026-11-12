@@ -28,14 +28,12 @@ mod loader;
 mod manifest;
 
 pub use host::{
-    args_to_map, call_sync_callback, empty_map, run_background_callback, build_load_engine,
-    CommandArgs, CommandResult, Collected, CollectedCommand, ProgressSink, RhaiProgram,
-    SharedCollected, TaskFailure, CANCEL_SENTINEL, DOCK_AREAS,
+    call_sync_callback, run_background_callback, CommandArgs, CommandResult, Collected,
+    CollectedCommand, ProgressSink, RhaiProgram, TaskFailure,
 };
 pub use loader::{
-    discover, load_all, load_all_with, load_one, read_manifest, requires_gate, run_entry,
-    CommandRegistration, LoadedPlugins, PanelRegistration, PluginGate, ToolbarItemRegistration,
-    ViewRegistration,
+    discover, load_all, load_all_with, read_manifest, run_entry, CommandRegistration,
+    LoadedPlugins, PanelRegistration, PluginGate, ToolbarItemRegistration, ViewRegistration,
 };
 pub use manifest::{
     parse, split_entry_point, validate, Compatibility, Permissions, PluginInfo, PluginManifest,

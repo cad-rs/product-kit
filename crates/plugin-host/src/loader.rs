@@ -96,13 +96,6 @@ pub fn read_manifest(dir: &Path) -> Result<PluginManifest, String> {
     Ok(manifest)
 }
 
-/// Loads one plugin directory. `Err(reason)` means the plugin is rejected.
-pub fn load_one(dir: &Path) -> Result<(PluginManifest, RhaiProgram, Collected), String> {
-    let manifest = read_manifest(dir)?;
-    let (program, collected) = run_entry(dir, &manifest)?;
-    Ok((manifest, program, collected))
-}
-
 /// Compiles the plugin's entry script and runs its entry point, collecting
 /// what it declares.
 ///
@@ -144,24 +137,6 @@ pub fn run_entry(dir: &Path, manifest: &PluginManifest) -> Result<(RhaiProgram, 
 /// a license check over the vendor's verifying keys — so the plugin host stays
 /// free of keys and crypto.
 pub type PluginGate<'a> = &'a dyn Fn(&PluginManifest, &Path) -> Result<(), String>;
-
-/// A [`PluginGate`] over the product's entitlement answer: a plugin loads
-/// only if every capability its manifest `requires` is allowed.
-///
-/// `check` is the product's allow/deny question — typically
-/// `|capability| harness.check_entitlement(capability)` mapped to `Err(reason)`
-/// on a denial — so the plugin host stays free of accounts. Combine it with a
-/// license gate by calling both from one closure.
-pub fn requires_gate<'a>(
-    check: &'a dyn Fn(&str) -> Result<(), String>,
-) -> impl Fn(&PluginManifest, &Path) -> Result<(), String> + 'a {
-    move |manifest, _dir| {
-        manifest.plugin.requires.iter().try_for_each(|capability| {
-            check(capability)
-                .map_err(|reason| format!("requires `{capability}`: {reason}"))
-        })
-    }
-}
 
 /// Loads every plugin under `dirs` without license checking (an open plugin
 /// set). See [`load_all_with`].
@@ -515,47 +490,4 @@ fn c(task, args) { task.check_cancelled() }"#,
         }
     }
 
-    #[test]
-    fn a_plugin_loads_only_with_the_capabilities_it_requires() {
-        let gated = MANIFEST.replace(
-            "entry_point = \"plugin.rhai\"",
-            "entry_point = \"plugin.rhai\"\nrequires = [\"export.gds\", \"pro\"]",
-        );
-        let owns = |owned: &'static [&'static str]| {
-            move |capability: &str| {
-                if owned.contains(&capability) {
-                    Ok(())
-                } else {
-                    Err("not in your plan".to_string())
-                }
-            }
-        };
-
-        // Refused: the reason names the missing capability, and the script
-        // never runs — a broken one is not even compiled.
-        let parent = plugin_parent("requires-refused");
-        write_plugin(&parent, "gated", &gated, "fn register() { syntax error", &[]);
-        let check = owns(&["export.gds"]);
-        let loaded = load_all_with(std::slice::from_ref(&parent), &requires_gate(&check));
-        assert!(loaded.plugins_loaded.is_empty());
-        let reason = &loaded.plugins_rejected[0].1;
-        assert_eq!(reason, "license: requires `pro`: not in your plan");
-        let _ = std::fs::remove_dir_all(&parent);
-
-        // Every requirement allowed: loads.
-        let parent = plugin_parent("requires-allowed");
-        write_plugin(&parent, "gated", &gated, ENTRY, &[]);
-        let check = owns(&["export.gds", "pro"]);
-        let loaded = load_all_with(std::slice::from_ref(&parent), &requires_gate(&check));
-        assert_eq!(loaded.plugins_loaded.len(), 1, "{:?}", loaded.plugins_rejected);
-        let _ = std::fs::remove_dir_all(&parent);
-
-        // A plugin that requires nothing passes any answer.
-        let parent = plugin_parent("requires-nothing");
-        write_plugin(&parent, "open", MANIFEST, ENTRY, &[]);
-        let check = owns(&[]);
-        let loaded = load_all_with(std::slice::from_ref(&parent), &requires_gate(&check));
-        assert_eq!(loaded.plugins_loaded.len(), 1, "{:?}", loaded.plugins_rejected);
-        let _ = std::fs::remove_dir_all(&parent);
-    }
 }

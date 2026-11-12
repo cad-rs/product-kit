@@ -101,12 +101,6 @@ pub trait ViewportSlot: 'static {
     fn element(handle: &Self::Handle) -> gpui::AnyElement;
 }
 
-/// Device-pixel size of a paint bounds at the window's scale factor, at least
-/// 1×1 and clamped to a sane maximum.
-pub fn device_size(bounds: &Bounds<Pixels>, scale_factor: f32) -> (u32, u32) {
-    clamped_device_size(bounds, scale_factor, 4096)
-}
-
 /// Device-pixel size of `bounds`, at least 1×1 and at most `max` per side.
 /// Rounds the way GPUI places the element, so a frame covers it exactly.
 fn clamped_device_size(bounds: &Bounds<Pixels>, scale_factor: f32, max: u32) -> (u32, u32) {
@@ -115,11 +109,6 @@ fn clamped_device_size(bounds: &Bounds<Pixels>, scale_factor: f32, max: u32) -> 
         (device.size.width.0.max(1) as u32).min(max),
         (device.size.height.0.max(1) as u32).min(max),
     )
-}
-
-/// Aspect ratio of a device-pixel size, guarded against a zero height.
-pub fn aspect(size: (u32, u32)) -> f32 {
-    size.0.max(1) as f32 / size.1.max(1) as f32
 }
 
 #[cfg(test)]
@@ -153,24 +142,20 @@ mod tests {
 
     #[test]
     fn device_size_scales_and_clamps() {
-        assert_eq!(device_size(&bounds(100.0, 50.0), 1.0), (100, 50));
-        assert_eq!(device_size(&bounds(100.0, 50.0), 2.0), (200, 100));
+        assert_eq!(clamped_device_size(&bounds(100.0, 50.0), 1.0, 4096), (100, 50));
+        assert_eq!(clamped_device_size(&bounds(100.0, 50.0), 2.0, 4096), (200, 100));
         // A zero-sized bounds still yields a renderable target.
-        assert_eq!(device_size(&bounds(0.0, 0.0), 1.0), (1, 1));
+        assert_eq!(clamped_device_size(&bounds(0.0, 0.0), 1.0, 4096), (1, 1));
         // The clamp keeps a huge HiDPI window from allocating a 16k target.
-        assert_eq!(device_size(&bounds(4096.0, 4096.0), 8.0), (4096, 4096));
+        assert_eq!(
+            clamped_device_size(&bounds(4096.0, 4096.0), 8.0, 4096),
+            (4096, 4096)
+        );
         // A device with a smaller texture limit clamps further.
         assert_eq!(
             clamped_device_size(&bounds(4096.0, 100.0), 1.0, 2048),
             (2048, 100)
         );
-    }
-
-    #[test]
-    fn aspect_guards_a_zero_height() {
-        assert_eq!(aspect((100, 50)), 2.0);
-        assert_eq!(aspect((100, 0)), 100.0);
-        assert_eq!(aspect((0, 0)), 1.0);
     }
 
     #[test]
