@@ -58,6 +58,12 @@ The `crates/` members are the GPU view slot, shared with the same rule:
   (web dynamic texture, Windows DirectComposition surface, offscreen readback),
   the `Viewport` / `ViewportContent` / `ViewportInput` shell, and the
   `ViewportSlot` contract a product renderer implements.
+- **plugin-host** — the Rhai script-plugin host: the `plugin.toml` manifest
+  (`parse` / `validate` / `split_entry_point`), the load/exec engines with the
+  injected Host API (seven registration globals, six `Task` methods), and the
+  neutral loading pipeline (`LoadedPlugins`, `PluginGate`, `requires_gate`).
+  The frameworks' adapters commit the declarations — workbench's into its
+  `Registry`, nanobot's shell into its panel host.
 
 Later arrivals by the same rule (duplicated in both frameworks today):
 i18n mechanics, product identity,
@@ -70,19 +76,22 @@ consumers (which sit on gpui-fast) can share it, and native builds never
 compile the web-sys layer (it is target-gated).
 
 The `crates/` members are the exception by design: `gpui-gpu-view` is the
-shared GPU render slot and depends on gpui + wgpu, while `gpu-readback` is its
+shared GPU render slot and depends on gpui + wgpu, `gpu-readback` is its
 platform-independent readback target (wgpu only, so headless cores can use it
-without pulling gpui in).
+without pulling gpui in), and `plugin-host` is the shared Rhai plugin host
+(rhai + toml + serde, no GUI).
 
 ## Consumers
 
 Path dependencies from sibling checkouts (the rcad-pro root lays every
 checkout out side by side):
 
-- nanobot (`nanobot/crates/nanobot-ui`, `nanobot-session`, `nanobot-boot`):
-  `../../../product-kit`; the GPU slot:
-  `../../../product-kit/crates/gpui-gpu-view`
+- nanobot (`nanobot/crates/nanobot-ui`, `nanobot-session`, `nanobot-boot`,
+  `nanobot-rhai`): `../../../product-kit`; the GPU slot:
+  `../../../product-kit/crates/gpui-gpu-view`; the plugin host:
+  `../../../product-kit/crates/plugin-host`
 - workbench-rs (`rcad/workbench-rs/crates/workbench-core`,
   `crates/workbench-api`): `../../../../product-kit`; the GPU slot:
   `../../../../product-kit/crates/gpui-gpu-view`, the readback target:
-  `../../../../product-kit/crates/gpu-readback`
+  `../../../../product-kit/crates/gpu-readback`, the plugin host:
+  `../../../../product-kit/crates/plugin-host`

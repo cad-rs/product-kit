@@ -1,0 +1,13 @@
+[package]
+name = "plugin-host"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "The shared Rhai script-plugin host: the plugin.toml manifest, the load/exec engines with the injected Host API, and the neutral loading pipeline both gpui frameworks consume"
+
+[dependencies]
+# The script runtime. Both frameworks pin the same version and feature set, so
+# one engine serves both.
+rhai = { version = "=1.26.0", features = ["internals", "metadata", "serde"] }
+toml = "0.9"
+serde = { version = "1", features = ["derive"] }
