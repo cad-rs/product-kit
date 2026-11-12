@@ -1,27 +1,36 @@
-//! Where user files live (ported from workbench-rs's storage design).
+//! Where user files live.
 //!
-//! A [`Location`] names a file by the storage provider that holds it and
-//! that provider's key for it: a path in the browser's origin-private file
-//! system, an OS path, an object id in a cloud store. Callers remember a
-//! `Location`, never an OS path, so opening and saving work the same
-//! whichever provider holds the file.
+//! A [`Location`] names a file by the storage provider that holds it and that
+//! provider's key for it: a path in the browser's origin-private file system,
+//! an OS path, an object id in a cloud store. Callers remember a `Location`,
+//! never an OS path, so opening and saving work the same whichever provider
+//! holds the file.
 //!
 //! Providers are asynchronous (the origin-private file system has only async
-//! APIs on the page's thread). Futures carry no `Send` bound: the OPFS
-//! provider exists for web builds only, where everything runs on the page's
-//! thread.
+//! APIs on the page's thread). Futures are `Send` on the desktop, where they
+//! are spawned off the UI thread; on the web they carry no `Send` bound, since
+//! the OPFS provider holds JS values.
 
 use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 
+/// The provider id of the local file system (desktop builds register it).
+pub const LOCAL: &str = "local";
+
 /// A storage operation's future.
+#[cfg(not(target_arch = "wasm32"))]
+pub type StorageFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>> + Send>>;
+/// A storage operation's future (no `Send` bound on the web; see the module
+/// docs).
+#[cfg(target_arch = "wasm32")]
 pub type StorageFuture<T> = Pin<Box<dyn Future<Output = Result<T, String>>>>;
 
 /// A failed storage operation.
-pub fn failed<T: 'static>(message: String) -> StorageFuture<T> {
+pub fn failed<T: Send + 'static>(message: String) -> StorageFuture<T> {
     Box::pin(std::future::ready(Err(message)))
 }
 
@@ -52,6 +61,11 @@ impl Location {
         }
     }
 
+    /// A file on the local file system.
+    pub fn local(path: impl AsRef<Path>) -> Self {
+        Self::new(LOCAL, path.as_ref().to_string_lossy())
+    }
+
     /// The key's last segment: the file name for providers whose keys are
     /// paths.
     pub fn file_name(&self) -> &str {
@@ -63,17 +77,35 @@ impl Location {
         split_file_name(self.file_name()).0
     }
 
+    /// The file name's extension, without the dot.
+    pub fn extension(&self) -> Option<&str> {
+        split_file_name(self.file_name()).1
+    }
+
     /// The file or folder `name` in this folder (keys are `/`-separated
     /// paths; the root folder's key is `""`).
     pub fn child(&self, name: &str) -> Location {
         Location::new(self.provider.as_str(), join_key(&self.key, name))
+    }
+
+    /// The file beside this one with `.{tag}` before the extension:
+    /// `a/part.rcad` tagged `v1` is `a/part.v1.rcad` (for keys that are paths).
+    pub fn tagged(&self, tag: &str) -> Location {
+        let stem_end = self.key.len() - self.file_name().len() + self.file_stem().len();
+        let mut key = self.key.clone();
+        key.insert_str(stem_end, &format!(".{tag}"));
+        Location::new(self.provider.as_str(), key)
     }
 }
 
 impl fmt::Display for Location {
     /// Local files show as their path, other files as `provider:key`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.provider, self.key)
+        if self.provider == LOCAL {
+            f.write_str(&self.key)
+        } else {
+            write!(f, "{}:{}", self.provider, self.key)
+        }
     }
 }
 
@@ -152,19 +184,19 @@ impl Storage {
         self.providers.contains_key(id)
     }
 
-    /// The places the in-app picker browses, as (id, label).
+    /// The places the in-app picker browses, as (id, label): every provider
+    /// but the local file system, whose files the OS's own dialogs pick.
     pub fn in_app_sources(&self) -> Vec<(String, String)> {
         self.providers
             .iter()
+            .filter(|(id, _)| *id != LOCAL)
             .map(|(id, provider)| (id.clone(), provider.label().to_string()))
             .collect()
     }
 
     /// List the folder at `location`.
     pub fn list(&self, location: &Location) -> StorageFuture<Vec<Entry>> {
-        self.route(location, format!("read folder {location}"), |p, key| {
-            p.list(key)
-        })
+        self.route(location, format!("read folder {location}"), |p, key| p.list(key))
     }
 
     /// Create the folder at `location`.
@@ -186,16 +218,39 @@ impl Storage {
         })
     }
 
-    fn route<T: 'static>(
+    /// Write `bytes` to `location` after copying the file they replace to
+    /// `keep_at`. If the copy fails, nothing is written.
+    pub fn write_keeping_old(
         &self,
         location: &Location,
-        missing: String,
-        call: impl FnOnce(&Arc<dyn StorageProvider>, &str) -> StorageFuture<T>,
+        keep_at: &Location,
+        bytes: Vec<u8>,
+    ) -> StorageFuture<()> {
+        let (storage, location, keep_at) = (self.clone(), location.clone(), keep_at.clone());
+        // One step at a time: providers may start working when called, not
+        // when polled, so each write is only requested once its turn comes.
+        Box::pin(async move {
+            let old = storage.read(&location).await?;
+            storage.write(&keep_at, old).await?;
+            storage.write(&location, bytes).await
+        })
+    }
+
+    /// Run `op` on the provider holding `location`; errors say what failed.
+    fn route<T: Send + 'static>(
+        &self,
+        location: &Location,
+        what: String,
+        op: impl FnOnce(&dyn StorageProvider, &str) -> StorageFuture<T>,
     ) -> StorageFuture<T> {
-        match self.providers.get(&location.provider) {
-            Some(provider) => call(provider, &location.key),
-            None => failed(missing),
-        }
+        let Some(provider) = self.providers.get(&location.provider) else {
+            return failed(format!(
+                "Failed to {what}: no `{}` storage",
+                location.provider
+            ));
+        };
+        let future = op(provider.as_ref(), &location.key);
+        Box::pin(async move { future.await.map_err(|e| format!("Failed to {what}: {e}")) })
     }
 }
 
@@ -210,6 +265,20 @@ mod tests {
         // A leading dot starts a name, not an extension.
         assert_eq!(split_file_name(".rcad"), (".rcad", None));
         assert_eq!(split_file_name("a.b.rcad"), ("a.b", Some("rcad")));
+    }
+
+    #[test]
+    fn names_come_from_the_last_key_segment() {
+        let local = Location::local(r"C:\work\part.v2.rcad");
+        assert_eq!(local.file_name(), "part.v2.rcad");
+        assert_eq!(local.file_stem(), "part.v2");
+        assert_eq!(local.extension(), Some("rcad"));
+        assert_eq!(local.to_string(), r"C:\work\part.v2.rcad");
+
+        let opfs = Location::new("opfs", "docs/.hidden");
+        assert_eq!(opfs.file_stem(), ".hidden");
+        assert_eq!(opfs.extension(), None);
+        assert_eq!(opfs.to_string(), "opfs:docs/.hidden");
     }
 
     #[test]
@@ -228,11 +297,36 @@ mod tests {
     }
 
     #[test]
+    fn children_and_save_names() {
+        let root = Location::new("opfs", "");
+        assert_eq!(root.child("a"), Location::new("opfs", "a"));
+        assert_eq!(
+            root.child("a").child("b.rcad"),
+            Location::new("opfs", "a/b.rcad")
+        );
+
+        let exts = vec!["rcad".to_string()];
+        assert_eq!(with_extension(" part ", &exts), "part.rcad");
+        assert_eq!(with_extension("part.RCAD", &exts), "part.RCAD");
+        assert_eq!(with_extension("part.v2", &exts), "part.v2.rcad");
+        assert_eq!(with_extension("notes.txt", &[]), "notes.txt");
+    }
+
+    #[test]
     fn keys_join_into_slash_paths_with_an_empty_root() {
         assert_eq!(join_key("", "a.rcad"), "a.rcad");
         assert_eq!(join_key("docs", "a.rcad"), "docs/a.rcad");
         let root = Location::new("opfs", "");
         assert_eq!(root.child("docs").key, "docs");
         assert_eq!(root.child("docs").child("a.rcad").key, "docs/a.rcad");
+    }
+
+    #[test]
+    fn a_tag_goes_before_the_extension() {
+        let tagged = |key: &str| Location::new("p", key).tagged("v1").key;
+        assert_eq!(tagged("a/part.rcad"), "a/part.v1.rcad");
+        assert_eq!(tagged(r"C:\work\part.v2.rcad"), r"C:\work\part.v2.v1.rcad");
+        assert_eq!(tagged("dir.d/part"), "dir.d/part.v1");
+        assert_eq!(tagged(".hidden"), ".hidden.v1");
     }
 }
