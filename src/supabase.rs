@@ -286,15 +286,53 @@ mod tests {
         let mock_port = mock.local_addr().expect("the mock address").port();
         let mock_thread = std::thread::spawn(move || {
             let (mut stream, _) = mock.accept().expect("the mock accepts");
+            // Read the whole request: a single read can return only the
+            // headers when the client's body is still in flight.
+            let mut raw = Vec::new();
             let mut buf = [0u8; 8192];
-            let read = stream.read(&mut buf).expect("the mock reads");
-            let request = String::from_utf8_lossy(&buf[..read]).to_string();
+            loop {
+                let read = stream.read(&mut buf).expect("the mock reads");
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buf[..read]);
+                let text = String::from_utf8_lossy(&raw);
+                let header_end = text
+                    .find("\r\n\r\n")
+                    .map(|index| index + 4)
+                    .or_else(|| text.find("\n\n").map(|index| index + 2));
+                let Some(header_end) = header_end else { continue };
+                let length = text[..header_end].lines().find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                });
+                match length {
+                    Some(length) if raw.len() >= header_end + length => break,
+                    None => break,
+                    _ => {}
+                }
+            }
+            let request = String::from_utf8_lossy(&raw).to_string();
             assert!(
                 request.starts_with("POST /auth/v1/token?grant_type=pkce"),
                 "{request}"
             );
             assert!(request.contains("apikey: test-key"), "{request}");
-            assert!(request.contains("auth_code=abc"), "{request}");
+            assert!(
+                request.to_lowercase().contains("content-type: application/json"),
+                "{request}"
+            );
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .or_else(|| request.split("\n\n").nth(1))
+                .unwrap_or("{}");
+            let parsed: serde_json::Value =
+                serde_json::from_str(body).expect("the token body is JSON");
+            assert_eq!(parsed["auth_code"], "abc");
+            let verifier = parsed["code_verifier"].as_str().unwrap_or("");
+            assert!(!verifier.is_empty(), "the PKCE verifier rides in the body");
             let body = concat!(
                 r#"{"access_token":"tok-1","refresh_token":"ref-1","expires_in":3600,"#,
                 r#""user":{"id":"u1","email":"u1@example.test","user_metadata":{"name":"Alice"}}}"#,
@@ -806,10 +844,17 @@ fn exchange(config: &Config, code: &str, verifier: &str) -> Result<Account, Stri
         "{}/auth/v1/token?grant_type=pkce",
         config.url.trim_end_matches('/')
     );
+    // GoTrue's PKCE grant takes a JSON body (`auth_code` + `code_verifier`),
+    // not a form: a form body is answered with "Could not parse request body
+    // as JSON".
+    let body = serde_json::json!({
+        "auth_code": code,
+        "code_verifier": verifier,
+    });
     let response = agent
         .post(&url)
         .header("apikey", &config.anon_key)
-        .send_form([("auth_code", code), ("code_verifier", verifier)])
+        .send_json(body)
         .map_err(|e| format!("the token request failed: {e}"))?;
     let status = response.status().as_u16();
     let body = response
