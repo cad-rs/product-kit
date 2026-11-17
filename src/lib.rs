@@ -17,6 +17,7 @@ pub mod picker;
 pub mod selfcheck;
 pub mod settings;
 pub mod storage;
+pub mod supabase;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod atomic;
@@ -48,6 +49,7 @@ pub use pack::pack_tree;
 pub use picker::FilePicker;
 pub use selfcheck::{report, Check, Summary};
 pub use settings::{Settings, SettingsStore};
+pub use supabase::{login_url, Session, SESSION_KEY};
 pub use storage::{
     failed, has_extension, join_key, split_file_name, with_extension, Entry, Location,
     Storage, StorageFuture, StorageProvider,
