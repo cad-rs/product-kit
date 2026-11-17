@@ -1,52 +1,44 @@
 //! The rcad.app Supabase account, shared by every deployed product.
 //!
-//! One account system: the Supabase project at [`DEFAULT_URL`]. On the web,
+//! One account system: the Supabase project at `DEFAULT_URL`. On the web,
 //! `web-console` runs the GitHub OAuth + PKCE flow and stores the session in
-//! localStorage under [`SESSION_KEY`]; `creator` web and `ocad` web are served
+//! localStorage under `rcad.session`; `creator` web and `ocad` web are served
 //! from the same origin and read the same entry. On the desktop,
 //! [`SupabaseAccount`] runs the same provider's authorization-code + PKCE flow
 //! against a loopback redirect ([`Config`]), so the signed-in user and the
 //! access token are the same account on both platforms.
 //!
-//! The session JSON shape is web-console's (it is the writer). Native builds
-//! have no localStorage: [`load`] returns `None` and [`store`]/[`clear`] do
-//! nothing, so a desktop product never mistakes a web session for its own
-//! credential store.
+//! [`Account`] is both the framework-neutral identity and the stored shape
+//! (the browser session and the desktop session file serialize to the same
+//! JSON), so nothing converts between two account types.
 
+#[cfg(not(target_family = "wasm"))]
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
 /// The Supabase project every deployed product signs in against.
-pub const DEFAULT_URL: &str = "https://vdixmifkbcefcegnhzjv.supabase.co";
+const DEFAULT_URL: &str = "https://vdixmifkbcefcegnhzjv.supabase.co";
 /// The OAuth provider the site uses.
-pub const DEFAULT_PROVIDER: &str = "github";
+const DEFAULT_PROVIDER: &str = "github";
+/// The localStorage key the browser session is stored under.
+const SESSION_KEY: &str = "rcad.session";
 
-/// The localStorage key the session is stored under.
-pub const SESSION_KEY: &str = "rcad.session";
-
-/// The authenticated browser session, kept in local storage.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Session {
+/// A signed-in Supabase account: the identity the product shows plus the
+/// tokens its services authenticate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Account {
+    pub user_id: String,
+    /// The provider's profile name, when it reports one.
+    pub name: Option<String>,
+    pub email: Option<String>,
     pub access_token: String,
     pub refresh_token: Option<String>,
     /// Unix seconds when the access token stops working.
     pub expires_at: i64,
-    pub user_id: String,
-    pub email: Option<String>,
-    pub name: Option<String>,
 }
 
-/// The identity the frameworks' account surfaces show. Every consumer maps it
-/// onto its own account type, so the name/email fallback lives once.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Identity {
-    pub id: String,
-    pub name: String,
-    pub email: Option<String>,
-}
-
-impl Session {
+impl Account {
     /// Whether the access token has reached its expiry.
     pub fn is_expired(&self) -> bool {
         now_unix() >= self.expires_at
@@ -60,57 +52,19 @@ impl Session {
             .or(self.email.as_deref())
             .unwrap_or("用户")
     }
-
-    /// The bearer token for the site's own services (the collaboration room).
-    pub fn access_token(&self) -> &str {
-        &self.access_token
-    }
-
-    /// The identity snapshot.
-    pub fn identity(&self) -> Identity {
-        Identity {
-            id: self.user_id.clone(),
-            name: self.display_name().to_string(),
-            email: self.email.clone(),
-        }
-    }
 }
 
-/// Reads the shared session; `None` when there is none (or not a browser).
+/// Reads the browser session; `None` when there is none.
 #[cfg(target_family = "wasm")]
-pub fn load() -> Option<Session> {
+fn load() -> Option<Account> {
     let storage = web_sys::window()?.local_storage().ok()??;
     let raw = storage.get_item(SESSION_KEY).ok()??;
     serde_json::from_str(&raw).ok()
 }
 
-/// Reads the shared session; native builds never have one.
-#[cfg(not(target_family = "wasm"))]
-pub fn load() -> Option<Session> {
-    None
-}
-
-/// Stores the session for the other apps on the origin to find.
+/// Clears the browser session (sign-out).
 #[cfg(target_family = "wasm")]
-pub fn store(session: &Session) {
-    let Some(storage) = web_sys::window()
-        .and_then(|window| window.local_storage().ok())
-        .flatten()
-    else {
-        return;
-    };
-    if let Ok(raw) = serde_json::to_string(session) {
-        let _ = storage.set_item(SESSION_KEY, &raw);
-    }
-}
-
-/// Stores the session; native builds have no local storage.
-#[cfg(not(target_family = "wasm"))]
-pub fn store(_session: &Session) {}
-
-/// Clears the shared session (sign-out).
-#[cfg(target_family = "wasm")]
-pub fn clear() {
+fn clear() {
     if let Some(storage) = web_sys::window()
         .and_then(|window| window.local_storage().ok())
         .flatten()
@@ -119,19 +73,15 @@ pub fn clear() {
     }
 }
 
-/// Clears the shared session; native builds have no local storage.
-#[cfg(not(target_family = "wasm"))]
-pub fn clear() {}
-
 /// The login page of the site's console, returning to `next` (a same-origin
 /// path) once the flow completes. An empty `next` lands on the console.
-pub fn login_url(next: &str) -> String {
+fn login_url(next: &str) -> String {
     #[cfg(target_family = "wasm")]
     let origin = web_sys::window()
         .and_then(|window| window.location().origin().ok())
-        .unwrap_or_else(|| "https://rcad.app".to_string());
+        .unwrap_or_else(|| DEFAULT_URL.to_string());
     #[cfg(not(target_family = "wasm"))]
-    let origin = "https://rcad.app".to_string();
+    let origin = DEFAULT_URL.to_string();
 
     if next.is_empty() {
         format!("{origin}/login")
@@ -169,275 +119,12 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn session() -> Session {
-        Session {
-            access_token: "token-1".to_string(),
-            refresh_token: Some("refresh-1".to_string()),
-            expires_at: now_unix() + 3600,
-            user_id: "u1".to_string(),
-            email: Some("u1@example.test".to_string()),
-            name: Some("Alice".to_string()),
-        }
-    }
-
-    #[test]
-    fn a_session_round_trips_through_its_json_shape() {
-        let session = session();
-        let raw = serde_json::to_string(&session).expect("serializes");
-        assert_eq!(serde_json::from_str::<Session>(&raw).expect("parses"), session);
-    }
-
-    #[test]
-    fn the_display_name_falls_back_to_the_email_then_a_generic_label() {
-        let mut session = session();
-        assert_eq!(session.display_name(), "Alice");
-        session.name = None;
-        assert_eq!(session.display_name(), "u1@example.test");
-        session.email = None;
-        assert_eq!(session.display_name(), "用户");
-    }
-
-    #[test]
-    fn an_expired_session_is_recognized() {
-        let mut session = session();
-        assert!(!session.is_expired());
-        session.expires_at = now_unix() - 1;
-        assert!(session.is_expired());
-    }
-
-    #[test]
-    fn the_identity_carries_the_id_name_and_email() {
-        let identity = session().identity();
-        assert_eq!(identity.id, "u1");
-        assert_eq!(identity.name, "Alice");
-        assert_eq!(identity.email.as_deref(), Some("u1@example.test"));
-    }
-
-    #[test]
-    fn the_login_url_carries_the_return_path() {
-        let url = login_url("/creator/");
-        assert!(url.ends_with("/login?next=%2Fcreator%2F"), "{url}");
-        let bare = login_url("");
-        assert!(bare.ends_with("/login"), "{bare}");
-    }
-
-    #[test]
-    fn the_native_sign_in_url_carries_the_pkce_parameters() {
-        let request = SupabaseAccount::new(Config {
-            url: "https://project.test".to_string(),
-            provider: "github".to_string(),
-            redirect_port: 0,
-            redirect_path: "/callback".to_string(),
-            ..Config::default()
-        })
-        .begin()
-        .expect("the sign-in starts");
-        assert!(request.user_code.is_none(), "the loopback redirect has no code");
-        let url = request.url;
-        assert!(url.starts_with("https://project.test/auth/v1/authorize?"), "{url}");
-        for pair in [
-            "provider=github",
-            "code_challenge_method=S256",
-            "redirect_to=http%3A%2F%2F127.0.0.1%3A",
-            "code_challenge=",
-            "state=",
-        ] {
-            assert!(url.contains(pair), "{url} is missing {pair}");
-        }
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    #[test]
-    fn the_desktop_session_survives_a_restart() {
-        let dir = std::env::temp_dir().join(format!("rcad-supabase-session-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let path = dir.join("session.json");
-        let account = Account {
-            id: "u1".to_string(),
-            name: "Alice".to_string(),
-            email: Some("u1@example.test".to_string()),
-            access_token: "token".to_string(),
-            refresh_token: Some("refresh".to_string()),
-            expires_at: Some(now_unix() + 3600),
-        };
-        save_session(&path, &account).expect("the session saves");
-        let restored = SupabaseAccount::new(Config {
-            session_path: Some(path.clone()),
-            ..Config::default()
-        })
-        .account()
-        .expect("the session restores");
-        assert_eq!(restored, account);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(not(target_family = "wasm"))]
-    #[test]
-    fn the_desktop_flow_completes_through_the_loopback_redirect() {
-        use std::io::{Read, Write};
-        use std::net::{Ipv4Addr, TcpListener};
-
-        // A mock Supabase token endpoint.
-        let mock = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("the mock binds");
-        let mock_port = mock.local_addr().expect("the mock address").port();
-        let mock_thread = std::thread::spawn(move || {
-            let (mut stream, _) = mock.accept().expect("the mock accepts");
-            // Read the whole request: a single read can return only the
-            // headers when the client's body is still in flight.
-            let mut raw = Vec::new();
-            let mut buf = [0u8; 8192];
-            loop {
-                let read = stream.read(&mut buf).expect("the mock reads");
-                if read == 0 {
-                    break;
-                }
-                raw.extend_from_slice(&buf[..read]);
-                let text = String::from_utf8_lossy(&raw);
-                let header_end = text
-                    .find("\r\n\r\n")
-                    .map(|index| index + 4)
-                    .or_else(|| text.find("\n\n").map(|index| index + 2));
-                let Some(header_end) = header_end else { continue };
-                let length = text[..header_end].lines().find_map(|line| {
-                    line.to_ascii_lowercase()
-                        .strip_prefix("content-length:")
-                        .and_then(|value| value.trim().parse::<usize>().ok())
-                });
-                match length {
-                    Some(length) if raw.len() >= header_end + length => break,
-                    None => break,
-                    _ => {}
-                }
-            }
-            let request = String::from_utf8_lossy(&raw).to_string();
-            assert!(
-                request.starts_with("POST /auth/v1/token?grant_type=pkce"),
-                "{request}"
-            );
-            assert!(request.contains("apikey: test-key"), "{request}");
-            assert!(
-                request.to_lowercase().contains("content-type: application/json"),
-                "{request}"
-            );
-            let body = request
-                .split("\r\n\r\n")
-                .nth(1)
-                .or_else(|| request.split("\n\n").nth(1))
-                .unwrap_or("{}");
-            let parsed: serde_json::Value =
-                serde_json::from_str(body).expect("the token body is JSON");
-            assert_eq!(parsed["auth_code"], "abc");
-            let verifier = parsed["code_verifier"].as_str().unwrap_or("");
-            assert!(!verifier.is_empty(), "the PKCE verifier rides in the body");
-            let body = concat!(
-                r#"{"access_token":"tok-1","refresh_token":"ref-1","expires_in":3600,"#,
-                r#""user":{"id":"u1","email":"u1@example.test","user_metadata":{"name":"Alice"}}}"#,
-            );
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            stream.write_all(response.as_bytes()).expect("the mock replies");
-        });
-
-        let dir = std::env::temp_dir().join(format!("rcad-supabase-flow-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let account = SupabaseAccount::new(Config {
-            url: format!("http://127.0.0.1:{mock_port}"),
-            provider: "github".to_string(),
-            anon_key: "test-key".to_string(),
-            redirect_port: 0,
-            redirect_path: "/callback".to_string(),
-            session_path: Some(dir.join("session.json")),
-        });
-        let request = account.begin().expect("the sign-in starts");
-        let query = request.url.split_once('?').expect("the query").1;
-        let params: std::collections::HashMap<String, String> =
-            form_urlencoded::parse(query.as_bytes()).into_owned().collect();
-        let redirect_to = params["redirect_to"].clone();
-        let state = params["state"].clone();
-
-        // The browser comes back to the loopback redirect.
-        let host = redirect_to
-            .strip_prefix("http://")
-            .and_then(|rest| rest.split('/').next())
-            .expect("the redirect host")
-            .to_string();
-        std::thread::spawn(move || {
-            let mut stream = std::net::TcpStream::connect(&host).expect("the redirect connects");
-            let request = format!(
-                "GET /callback?code=abc&state={state} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
-            );
-            stream.write_all(request.as_bytes()).expect("the redirect sends");
-        });
-
-        let outcome = loop {
-            match account.poll().expect("the poll") {
-                Poll::Pending | Poll::SlowDown => {
-                    std::thread::sleep(std::time::Duration::from_millis(20));
-                }
-                other => break other,
-            }
-        };
-        mock_thread.join().expect("the mock finishes");
-        match outcome {
-            Poll::Success(signed_in) => {
-                assert_eq!(signed_in.id, "u1");
-                assert_eq!(signed_in.name, "Alice");
-                assert_eq!(account.access_token().as_deref(), Some("tok-1"));
-            }
-            other => panic!("the sign-in completed: {other:?}"),
-        }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn a_account_is_expired_at_its_deadline() {
-        let mut account = Account {
-            id: "u1".to_string(),
-            name: "Alice".to_string(),
-            email: None,
-            access_token: "token".to_string(),
-            refresh_token: None,
-            expires_at: Some(now_unix() + 60),
-        };
-        assert!(!account.is_expired());
-        account.expires_at = Some(now_unix() - 1);
-        assert!(account.is_expired());
-    }
-}
-
-/// A signed-in Supabase account: the identity the product shows plus the
-/// tokens its services authenticate. It is also the persisted session shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Account {
-    pub id: String,
-    pub name: String,
-    pub email: Option<String>,
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    /// Unix seconds when the access token stops working, when known.
-    pub expires_at: Option<i64>,
-}
-
-impl Account {
-    /// Whether the access token has reached its expiry.
-    pub fn is_expired(&self) -> bool {
-        self.expires_at.is_some_and(|expires_at| now_unix() >= expires_at)
-    }
-}
-
-/// What the user does to sign in: open the URL (the loopback redirect has
-/// nothing to type).
+/// What the user does to sign in: open the URL. The Supabase flow has nothing
+/// to type (the loopback redirect and the console login both come back by
+/// themselves).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SignInRequest {
     pub url: String,
-    pub user_code: Option<String>,
     pub expires_in: u64,
     pub interval: u64,
 }
@@ -447,8 +134,6 @@ pub struct SignInRequest {
 pub enum Poll {
     /// Not finished yet; poll again after the interval.
     Pending,
-    /// The provider asked for a slower cadence; pending.
-    SlowDown,
     /// Signed in.
     Success(Account),
     /// The user refused.
@@ -507,8 +192,7 @@ impl Default for Config {
 fn default_session_path() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(
-        std::path::PathBuf::from(home)
-            .join("Library/Application Support/rcad/supabase-session.json"),
+        std::path::PathBuf::from(home).join("Library/Application Support/rcad/supabase-session.json"),
     )
 }
 
@@ -527,31 +211,30 @@ fn default_session_path() -> Option<std::path::PathBuf> {
         return Some(std::path::PathBuf::from(xdg).join("rcad/supabase-session.json"));
     }
     let home = std::env::var_os("HOME")?;
-    Some(
-        std::path::PathBuf::from(home).join(".config/rcad/supabase-session.json"),
-    )
+    Some(std::path::PathBuf::from(home).join(".config/rcad/supabase-session.json"))
 }
 
 /// The shared Supabase account capability. Clones share one state, so a
 /// product's shell and its per-session harness observe the same sign-in.
 #[derive(Clone, Debug)]
 pub struct SupabaseAccount {
+    /// The desktop flow's configuration and state; the web session lives in
+    /// localStorage and needs neither.
+    #[cfg(not(target_family = "wasm"))]
     config: Config,
-    /// The desktop sign-in/session state. Web builds keep the session in
-    /// localStorage (see [`load`]), so nothing reads this there.
-    #[allow(dead_code)]
+    #[cfg(not(target_family = "wasm"))]
     state: Arc<Mutex<State>>,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Debug)]
 enum State {
     Idle,
-    #[cfg(not(target_family = "wasm"))]
     Waiting(Pending),
-    #[cfg(not(target_family = "wasm"))]
     SignedIn(Account),
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for State {
     fn default() -> Self {
         Self::Idle
@@ -578,33 +261,33 @@ impl SupabaseAccount {
     pub fn new(config: Config) -> Self {
         // A desktop build comes back signed in from the persisted session.
         #[cfg(not(target_family = "wasm"))]
-        let state = match restore_session(config.session_path.as_deref()) {
-            Some(account) => State::SignedIn(account),
-            None => State::default(),
-        };
-        #[cfg(target_family = "wasm")]
-        let state = State::default();
-        Self {
-            config,
-            state: Arc::new(Mutex::new(state)),
+        {
+            let state = match restore_session(config.session_path.as_deref()) {
+                Some(account) => State::SignedIn(account),
+                None => State::default(),
+            };
+            Self {
+                config,
+                state: Arc::new(Mutex::new(state)),
+            }
         }
-    }
-
-    pub fn config(&self) -> &Config {
-        &self.config
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = config;
+            Self {}
+        }
     }
 
     /// Starts the platform's sign-in and returns what the user acts on.
     pub fn begin(&self) -> Result<SignInRequest, String> {
         #[cfg(target_family = "wasm")]
         {
-            Ok(SignInRequest {
+            return Ok(SignInRequest {
                 // The console's login page returns to this app (same origin).
                 url: login_url(&current_path()),
-                user_code: None,
                 expires_in: 300,
                 interval: 1,
-            })
+            });
         }
         #[cfg(not(target_family = "wasm"))]
         {
@@ -619,8 +302,8 @@ impl SupabaseAccount {
         #[cfg(target_family = "wasm")]
         {
             return Ok(match load() {
-                Some(session) if session.is_expired() => Poll::Expired,
-                Some(session) => Poll::Success(account_from_session(&session)),
+                Some(account) if account.is_expired() => Poll::Expired,
+                Some(account) => Poll::Success(account),
                 None => Poll::Pending,
             });
         }
@@ -633,15 +316,16 @@ impl SupabaseAccount {
     /// The signed-in account, when there is a non-expired one.
     pub fn account(&self) -> Option<Account> {
         #[cfg(target_family = "wasm")]
-        let account = load()
-            .map(|session| account_from_session(&session))
-            .filter(|account| !account.is_expired());
+        {
+            return load().filter(|account| !account.is_expired());
+        }
         #[cfg(not(target_family = "wasm"))]
-        let account = match &*lock(&self.state) {
-            State::SignedIn(account) if !account.is_expired() => Some(account.clone()),
-            _ => None,
-        };
-        account
+        {
+            match &*lock(&self.state) {
+                State::SignedIn(account) if !account.is_expired() => Some(account.clone()),
+                _ => None,
+            }
+        }
     }
 
     /// The bearer token for the site's own services while signed in.
@@ -713,7 +397,6 @@ impl SupabaseAccount {
         Ok((
             SignInRequest {
                 url,
-                user_code: None,
                 expires_in: 300,
                 interval: 1,
             },
@@ -850,11 +533,13 @@ fn exchange(config: &Config, code: &str, verifier: &str) -> Result<Account, Stri
     let body = serde_json::json!({
         "auth_code": code,
         "code_verifier": verifier,
-    });
+    })
+    .to_string();
     let response = agent
         .post(&url)
         .header("apikey", &config.anon_key)
-        .send_json(body)
+        .header("Content-Type", "application/json")
+        .send(body.as_str())
         .map_err(|e| format!("the token request failed: {e}"))?;
     let status = response.status().as_u16();
     let body = response
@@ -869,24 +554,23 @@ fn exchange(config: &Config, code: &str, verifier: &str) -> Result<Account, Stri
     }
     let parsed: TokenResponse = serde_json::from_str(&body)
         .map_err(|e| format!("the token response is not JSON: {e}"))?;
-    let name = ["name", "full_name", "preferred_username"]
-        .iter()
-        .find_map(|key| {
-            parsed
-                .user
-                .user_metadata
-                .get(*key)
-                .and_then(|value| value.as_str())
-        })
-        .unwrap_or(&parsed.user.id)
-        .to_string();
     Ok(Account {
-        id: parsed.user.id,
-        name,
+        user_id: parsed.user.id,
+        name: ["name", "full_name", "preferred_username"]
+            .iter()
+            .find_map(|key| {
+                parsed
+                    .user
+                    .user_metadata
+                    .get(*key)
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
+            }),
         email: parsed.user.email,
         access_token: parsed.access_token,
         refresh_token: parsed.refresh_token,
-        expires_at: parsed.expires_in.map(|secs| now_unix() + secs as i64),
+        // Same default as the console's session when the provider omits it.
+        expires_at: now_unix() + parsed.expires_in.unwrap_or(3600) as i64,
     })
 }
 
@@ -923,19 +607,6 @@ fn save_session(path: &std::path::Path, account: &Account) -> Result<(), String>
     Ok(())
 }
 
-/// Maps the shared web session onto the account.
-#[cfg(target_family = "wasm")]
-fn account_from_session(session: &Session) -> Account {
-    Account {
-        id: session.user_id.clone(),
-        name: session.display_name().to_string(),
-        email: session.email.clone(),
-        access_token: session.access_token.clone(),
-        refresh_token: session.refresh_token.clone(),
-        expires_at: Some(session.expires_at),
-    }
-}
-
 /// 256 random bits, URL-safe: long enough for a PKCE verifier.
 #[cfg(not(target_family = "wasm"))]
 fn random_token() -> Result<String, String> {
@@ -949,4 +620,212 @@ fn random_token() -> Result<String, String> {
 #[cfg(not(target_family = "wasm"))]
 fn lock(state: &Mutex<State>) -> std::sync::MutexGuard<'_, State> {
     state.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account() -> Account {
+        Account {
+            user_id: "u1".to_string(),
+            name: Some("Alice".to_string()),
+            email: Some("u1@example.test".to_string()),
+            access_token: "token-1".to_string(),
+            refresh_token: Some("refresh-1".to_string()),
+            expires_at: now_unix() + 3600,
+        }
+    }
+
+    #[test]
+    fn an_account_round_trips_through_its_json_shape() {
+        let account = account();
+        let raw = serde_json::to_string(&account).expect("serializes");
+        assert_eq!(serde_json::from_str::<Account>(&raw).expect("parses"), account);
+    }
+
+    #[test]
+    fn the_display_name_falls_back_to_the_email_then_a_generic_label() {
+        let mut account = account();
+        assert_eq!(account.display_name(), "Alice");
+        account.name = None;
+        assert_eq!(account.display_name(), "u1@example.test");
+        account.email = None;
+        assert_eq!(account.display_name(), "用户");
+    }
+
+    #[test]
+    fn an_account_is_expired_at_its_deadline() {
+        let mut account = account();
+        assert!(!account.is_expired());
+        account.expires_at = now_unix() - 1;
+        assert!(account.is_expired());
+    }
+
+    #[test]
+    fn the_login_url_carries_the_return_path() {
+        let url = login_url("/creator/");
+        assert!(url.ends_with("/login?next=%2Fcreator%2F"), "{url}");
+        let bare = login_url("");
+        assert!(bare.ends_with("/login"), "{bare}");
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn the_desktop_session_survives_a_restart() {
+        let dir = std::env::temp_dir().join(format!("rcad-supabase-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("session.json");
+        let account = account();
+        save_session(&path, &account).expect("the session saves");
+        let restored = SupabaseAccount::new(Config {
+            session_path: Some(path.clone()),
+            ..Config::default()
+        })
+        .account()
+        .expect("the session restores");
+        assert_eq!(restored, account);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn the_native_sign_in_url_carries_the_pkce_parameters() {
+        let request = SupabaseAccount::new(Config {
+            url: "https://project.test".to_string(),
+            ..Config::default()
+        })
+        .begin()
+        .expect("the sign-in starts");
+        let url = request.url;
+        assert!(url.starts_with("https://project.test/auth/v1/authorize?"), "{url}");
+        for pair in [
+            "provider=github",
+            "code_challenge_method=S256",
+            "redirect_to=http%3A%2F%2F127.0.0.1%3A",
+            "code_challenge=",
+            "state=",
+        ] {
+            assert!(url.contains(pair), "{url} is missing {pair}");
+        }
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn the_desktop_flow_completes_through_the_loopback_redirect() {
+        use std::io::{Read, Write};
+        use std::net::{Ipv4Addr, TcpListener};
+
+        // A mock Supabase token endpoint.
+        let mock = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("the mock binds");
+        let mock_port = mock.local_addr().expect("the mock address").port();
+        let mock_thread = std::thread::spawn(move || {
+            let (mut stream, _) = mock.accept().expect("the mock accepts");
+            // Read the whole request: a single read can return only the
+            // headers when the client's body is still in flight.
+            let mut raw = Vec::new();
+            let mut buf = [0u8; 8192];
+            loop {
+                let read = stream.read(&mut buf).expect("the mock reads");
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&buf[..read]);
+                let text = String::from_utf8_lossy(&raw);
+                let header_end = text
+                    .find("\r\n\r\n")
+                    .map(|index| index + 4)
+                    .or_else(|| text.find("\n\n").map(|index| index + 2));
+                let Some(header_end) = header_end else { continue };
+                let length = text[..header_end].lines().find_map(|line| {
+                    line.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|value| value.trim().parse::<usize>().ok())
+                });
+                match length {
+                    Some(length) if raw.len() >= header_end + length => break,
+                    None => break,
+                    _ => {}
+                }
+            }
+            let request = String::from_utf8_lossy(&raw).to_string();
+            assert!(
+                request.starts_with("POST /auth/v1/token?grant_type=pkce"),
+                "{request}"
+            );
+            assert!(request.contains("apikey: test-key"), "{request}");
+            assert!(
+                request.to_lowercase().contains("content-type: application/json"),
+                "{request}"
+            );
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .or_else(|| request.split("\n\n").nth(1))
+                .unwrap_or("{}");
+            let parsed: serde_json::Value =
+                serde_json::from_str(body).expect("the token body is JSON");
+            assert_eq!(parsed["auth_code"], "abc");
+            let verifier = parsed["code_verifier"].as_str().unwrap_or("");
+            assert!(!verifier.is_empty(), "the PKCE verifier rides in the body");
+            let body = concat!(
+                r#"{"access_token":"tok-1","refresh_token":"ref-1","expires_in":3600,"#,
+                r#""user":{"id":"u1","email":"u1@example.test","user_metadata":{"name":"Alice"}}}"#,
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("the mock replies");
+        });
+
+        let dir = std::env::temp_dir().join(format!("rcad-supabase-flow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let account = SupabaseAccount::new(Config {
+            url: format!("http://127.0.0.1:{mock_port}"),
+            anon_key: "test-key".to_string(),
+            redirect_port: 0,
+            redirect_path: "/callback".to_string(),
+            session_path: Some(dir.join("session.json")),
+            ..Config::default()
+        });
+        let request = account.begin().expect("the sign-in starts");
+        let query = request.url.split_once('?').expect("the query").1;
+        let params: std::collections::HashMap<String, String> =
+            form_urlencoded::parse(query.as_bytes()).into_owned().collect();
+        let redirect_to = params["redirect_to"].clone();
+        let state = params["state"].clone();
+
+        // The browser comes back to the loopback redirect.
+        let host = redirect_to
+            .strip_prefix("http://")
+            .and_then(|rest| rest.split('/').next())
+            .expect("the redirect host")
+            .to_string();
+        std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(&host).expect("the redirect connects");
+            let request = format!(
+                "GET /callback?code=abc&state={state} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes()).expect("the redirect sends");
+        });
+
+        let outcome = loop {
+            match account.poll().expect("the poll") {
+                Poll::Pending => std::thread::sleep(std::time::Duration::from_millis(20)),
+                other => break other,
+            }
+        };
+        mock_thread.join().expect("the mock finishes");
+        match outcome {
+            Poll::Success(signed_in) => {
+                assert_eq!(signed_in.user_id, "u1");
+                assert_eq!(signed_in.display_name(), "Alice");
+                assert_eq!(account.access_token().as_deref(), Some("tok-1"));
+            }
+            other => panic!("the sign-in completed: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

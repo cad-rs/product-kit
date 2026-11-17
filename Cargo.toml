@@ -28,8 +28,7 @@ sha2 = "0.10"
 # The desktop Supabase sign-in: the loopback token exchange (ureq) and secure
 # randomness for the PKCE verifier.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-# `json`: the Supabase token endpoint takes a JSON body.
-ureq = { version = "3", features = ["json"] }
+ureq = "3"
 getrandom = "0.3"
 
 # The browser file system lives behind these; native builds never see them.
