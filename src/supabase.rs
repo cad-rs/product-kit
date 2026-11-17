@@ -244,6 +244,7 @@ mod tests {
             "code_challenge_method=S256",
             "redirect_to=http%3A%2F%2F127.0.0.1%3A",
             "code_challenge=",
+            "state=",
         ] {
             assert!(url.contains(pair), "{url} is missing {pair}");
         }
@@ -271,6 +272,89 @@ mod tests {
         .account()
         .expect("the session restores");
         assert_eq!(restored, account);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_family = "wasm"))]
+    #[test]
+    fn the_desktop_flow_completes_through_the_loopback_redirect() {
+        use std::io::{Read, Write};
+        use std::net::{Ipv4Addr, TcpListener};
+
+        // A mock Supabase token endpoint.
+        let mock = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("the mock binds");
+        let mock_port = mock.local_addr().expect("the mock address").port();
+        let mock_thread = std::thread::spawn(move || {
+            let (mut stream, _) = mock.accept().expect("the mock accepts");
+            let mut buf = [0u8; 8192];
+            let read = stream.read(&mut buf).expect("the mock reads");
+            let request = String::from_utf8_lossy(&buf[..read]).to_string();
+            assert!(
+                request.starts_with("POST /auth/v1/token?grant_type=pkce"),
+                "{request}"
+            );
+            assert!(request.contains("apikey: test-key"), "{request}");
+            assert!(request.contains("auth_code=abc"), "{request}");
+            let body = concat!(
+                r#"{"access_token":"tok-1","refresh_token":"ref-1","expires_in":3600,"#,
+                r#""user":{"id":"u1","email":"u1@example.test","user_metadata":{"name":"Alice"}}}"#,
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).expect("the mock replies");
+        });
+
+        let dir = std::env::temp_dir().join(format!("rcad-supabase-flow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let account = SupabaseAccount::new(Config {
+            url: format!("http://127.0.0.1:{mock_port}"),
+            provider: "github".to_string(),
+            anon_key: "test-key".to_string(),
+            redirect_port: 0,
+            redirect_path: "/callback".to_string(),
+            session_path: Some(dir.join("session.json")),
+        });
+        let request = account.begin().expect("the sign-in starts");
+        let query = request.url.split_once('?').expect("the query").1;
+        let params: std::collections::HashMap<String, String> =
+            form_urlencoded::parse(query.as_bytes()).into_owned().collect();
+        let redirect_to = params["redirect_to"].clone();
+        let state = params["state"].clone();
+
+        // The browser comes back to the loopback redirect.
+        let host = redirect_to
+            .strip_prefix("http://")
+            .and_then(|rest| rest.split('/').next())
+            .expect("the redirect host")
+            .to_string();
+        std::thread::spawn(move || {
+            let mut stream = std::net::TcpStream::connect(&host).expect("the redirect connects");
+            let request = format!(
+                "GET /callback?code=abc&state={state} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(request.as_bytes()).expect("the redirect sends");
+        });
+
+        let outcome = loop {
+            match account.poll().expect("the poll") {
+                Poll::Pending | Poll::SlowDown => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => break other,
+            }
+        };
+        mock_thread.join().expect("the mock finishes");
+        match outcome {
+            Poll::Success(signed_in) => {
+                assert_eq!(signed_in.id, "u1");
+                assert_eq!(signed_in.name, "Alice");
+                assert_eq!(account.access_token().as_deref(), Some("tok-1"));
+            }
+            other => panic!("the sign-in completed: {other:?}"),
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -580,6 +664,7 @@ impl SupabaseAccount {
         let mut query = form_urlencoded::Serializer::new(String::new());
         query.append_pair("provider", &self.config.provider);
         query.append_pair("redirect_to", &redirect_uri);
+        query.append_pair("state", &state);
         query.append_pair("code_challenge", &challenge);
         query.append_pair("code_challenge_method", "S256");
         let url = format!(
