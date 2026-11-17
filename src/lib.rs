@@ -49,7 +49,10 @@ pub use pack::pack_tree;
 pub use picker::FilePicker;
 pub use selfcheck::{report, Check, Summary};
 pub use settings::{Settings, SettingsStore};
-pub use supabase::{login_url, Session, SESSION_KEY};
+pub use supabase::{
+    login_url, Account, Config, Poll, Session, SignInRequest, SupabaseAccount, DEFAULT_PROVIDER,
+    DEFAULT_URL, SESSION_KEY,
+};
 pub use storage::{
     failed, has_extension, join_key, split_file_name, with_extension, Entry, Location,
     Storage, StorageFuture, StorageProvider,
